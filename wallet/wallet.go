@@ -4823,6 +4823,7 @@ func (w *Wallet) SignTransaction(ctx context.Context, tx *wire.MsgTx, hashType t
 	err := walletdb.View(ctx, w.db, func(dbtx walletdb.ReadTx) error {
 		addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
 		txmgrNs := dbtx.ReadBucket(wtxmgrNamespaceKey)
+		var errEval error
 
 		for i, txIn := range tx.TxIn {
 			// For an SSGen tx, skip the first input as it is a stake base
@@ -4921,6 +4922,8 @@ func (w *Wallet) SignTransaction(ctx context.Context, tx *wire.MsgTx, hashType t
 							multisigNotEnoughSigs = true
 						}
 					}
+				} else {
+					errEval = err
 				}
 				// Only report an error for the script engine in the event
 				// that it's not a multisignature underflow, indicating that
@@ -4934,10 +4937,10 @@ func (w *Wallet) SignTransaction(ctx context.Context, tx *wire.MsgTx, hashType t
 				}
 			}
 		}
-		return nil
+		return errEval
 	})
 	if err != nil {
-		return nil, errors.E(op, err)
+		return signErrors, errors.E(op, err)
 	}
 	return signErrors, nil
 }

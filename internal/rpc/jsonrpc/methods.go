@@ -4926,10 +4926,7 @@ func (s *Server) signRawTransaction(ctx context.Context, icmd interface{}) (inte
 	// `complete' denotes that we successfully signed all outputs and that
 	// all scripts will run to completion. This is returned as part of the
 	// reply.
-	signErrs, err := w.SignTransaction(ctx, tx, hashType, inputs, keys, scripts)
-	if err != nil {
-		return nil, err
-	}
+	signErrs, signErr := w.SignTransaction(ctx, tx, hashType, inputs, keys, scripts)
 
 	var b strings.Builder
 	b.Grow(2 * tx.SerializeSize())
@@ -4952,7 +4949,7 @@ func (s *Server) signRawTransaction(ctx context.Context, icmd interface{}) (inte
 
 	return types.SignRawTransactionResult{
 		Hex:      b.String(),
-		Complete: len(signErrors) == 0,
+		Complete: len(signErrors) == 0 && signErr == nil,
 		Errors:   signErrors,
 	}, nil
 }
