@@ -1323,11 +1323,11 @@ func fetchAddressByHash(ns walletdb.ReadBucket, addrHash []byte) (interface{}, e
 // address type.  The caller should use type assertions to ascertain the type.
 // The caller should prefix the error message with the address which caused the
 // failure.
-func fetchAddress(ns walletdb.ReadBucket, addressID []byte) (interface{}, error) {
+func fetchAddress(ns walletdb.ReadBucket, addressID []byte, addrStr ...string) (interface{}, error) {
 	addrHash := sha256.Sum256(addressID)
 	addr, err := fetchAddressByHash(ns, addrHash[:])
 	if errors.Is(err, errors.NotExist) {
-		return nil, errors.E(errors.NotExist, errors.Errorf("no address with id %x", addressID))
+		return nil, errors.E(errors.NotExist, errors.Errorf("no address with id: %x, addrStr: %s)", addressID, addrStr))
 	}
 	return addr, err
 }

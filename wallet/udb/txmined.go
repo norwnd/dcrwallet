@@ -3332,6 +3332,7 @@ func (s *Store) MakeInputSource(dbtx walletdb.ReadTx, account uint32, minConf,
 
 			// Unspent credits are currently expected to be either P2PKH or
 			// P2PK, P2PKH/P2SH nested in a revocation/stakechange/vote output.
+			// TODO: this comment below is no longer quite relevant:
 			// Ignore stake P2SH since it can pay to any script, which the
 			// wallet may not recognize.
 			var scriptSize int
@@ -3342,6 +3343,8 @@ func (s *Store) MakeInputSource(dbtx walletdb.ReadTx, account uint32, minConf,
 				scriptSize = txsizes.RedeemP2PKHSigScriptSize
 			case stdscript.STPubKeyEcdsaSecp256k1:
 				scriptSize = txsizes.RedeemP2PKSigScriptSize
+			case stdscript.STScriptHash:
+				scriptSize = txsizes.RedeemP2SHSigScriptSize
 			default:
 				log.Errorf("unexpected script class for credit: %v", scriptClass)
 				continue

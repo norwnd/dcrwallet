@@ -4849,6 +4849,8 @@ func (w *Wallet) SignTransaction(ctx context.Context, tx *wire.MsgTx, hashType t
 			// look up the appropriate keys and scripts by address.
 			var source sigDataSource
 			source.key = func(addr stdaddr.Address) ([]byte, dcrec.SignatureType, bool, error) {
+				//panic("PANIC: called source.key")
+
 				if len(additionalKeysByAddress) != 0 {
 					addrStr := addr.String()
 					wif, ok := additionalKeysByAddress[addrStr]
@@ -4857,14 +4859,24 @@ func (w *Wallet) SignTransaction(ctx context.Context, tx *wire.MsgTx, hashType t
 							errors.Errorf("no key for address (needed: %v, have %v)",
 								addr, additionalKeysByAddress)
 					}
+
+					// TODO
+					//panic("PANIC: weird branch")
+
 					return wif.PrivKey(), dcrec.STEcdsaSecp256k1, true, nil
 				}
 
 				key, done, err := w.manager.PrivateKey(addrmgrNs, addr)
 				if err != nil {
+					// TODO
+					//panic(err)
 					return nil, 0, false, err
 				}
 				doneFuncs = append(doneFuncs, done)
+
+				// TODO
+				//panic("PANIC: after private key fetched")
+
 				return key.Serialize(), dcrec.STEcdsaSecp256k1, true, nil
 			}
 			source.script = func(addr stdaddr.Address) ([]byte, error) {
@@ -4889,8 +4901,9 @@ func (w *Wallet) SignTransaction(ctx context.Context, tx *wire.MsgTx, hashType t
 			if (hashType&txscript.SigHashSingle) !=
 				txscript.SigHashSingle || i < len(tx.TxOut) {
 
-				script, err := sign.SignTxOutput(w.ChainParams(),
-					tx, i, prevOutScript, hashType, source, source, txIn.SignatureScript, true) // Yes treasury
+				script, err := sign.SignTxOutput(w.ChainParams(), tx,
+					i, prevOutScript,
+					hashType, source, source, txIn.SignatureScript, true) // Yes treasury
 				// Failure to sign isn't an error, it just means that
 				// the tx isn't complete.
 				if err != nil {
@@ -4901,6 +4914,12 @@ func (w *Wallet) SignTransaction(ctx context.Context, tx *wire.MsgTx, hashType t
 					continue
 				}
 				txIn.SignatureScript = script
+
+				//sigScriptDisasmBefore, err := txscript.DisasmString(script)
+				//if err != nil {
+				//	panic(err)
+				//}
+				//fmt.Println(fmt.Sprintf("sigScriptDisasmBefore: %s", sigScriptDisasmBefore))
 			}
 
 			// Either it was already signed or we just signed it.

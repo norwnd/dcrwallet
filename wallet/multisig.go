@@ -92,6 +92,8 @@ func (w *Wallet) PrepareRedeemMultiSigOutTxOutput(msgTx *wire.MsgTx, p2shOutput 
 		return errors.E(op, errors.Errorf("estimated fee %v is above output value %v",
 			feeEst, p2shOutput.OutputAmount))
 	}
+	// This fee estimation above is broken ... adding some constant buffer here to patch it.
+	feeEst += 2000
 
 	toReceive := p2shOutput.OutputAmount - feeEst
 	// set the output value and add to the tx
