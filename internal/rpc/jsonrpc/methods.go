@@ -3425,6 +3425,8 @@ func (s *Server) purchaseTicket(ctx context.Context, icmd interface{}) (interfac
 
 	ticketsResponse, err := w.PurchaseTickets(ctx, n, request)
 	if err != nil {
+		//// TODO
+		//panic(err)
 		return nil, err
 	}
 	ticketsTx := ticketsResponse.Tickets

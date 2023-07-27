@@ -2494,7 +2494,7 @@ func (m *Manager) PrivateKey(ns walletdb.ReadBucket, addr stdaddr.Address) (key 
 	if err != nil {
 		return nil, nil, err
 	}
-	addrInterface, err := fetchAddress(ns, id)
+	addrInterface, err := fetchAddress(ns, id, addr.String())
 	if err != nil {
 		return nil, nil, err
 	}

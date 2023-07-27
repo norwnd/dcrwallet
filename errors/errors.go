@@ -210,6 +210,11 @@ func E(args ...interface{}) error {
 		}
 	}
 
+	// TODO
+	if e.Err != nil && strings.Contains(e.Err.Error(), "account 2147483647") {
+		panic("GOT U!")
+	}
+
 	// Promote the Op and Kind of the nested Error to the newly created error,
 	// if these fields were not part of the args.  This improves matching
 	// capabilities as well as improving the order of these fields in the

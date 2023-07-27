@@ -7,7 +7,11 @@ package wallet
 import (
 	"context"
 	"encoding/binary"
+	"encoding/hex"
+	"fmt"
 	"runtime/trace"
+
+	"github.com/decred/dcrd/txscript/v4/stdscript"
 
 	"decred.org/dcrwallet/v4/errors"
 	"decred.org/dcrwallet/v4/internal/compat"
@@ -946,6 +950,39 @@ func (src *p2PKHChangeSource) Script() ([]byte, uint16, error) {
 }
 
 func (src *p2PKHChangeSource) ScriptSize() int {
+	return txsizes.P2PKHPkScriptSize
+}
+
+type p2SHChangeSource struct {
+	// TODO - basically this change address is targetting imported multisig
+	//  address - which is the change address for multisig scenario.
+}
+
+func (src *p2SHChangeSource) Script() ([]byte, uint16, error) {
+	pk1, err := hex.DecodeString("030e4db4d37cfa43553c645ad20ca79ae79eef966f41243628310e7624d33a4145")
+	if err != nil {
+		return nil, 0, errors.E(errors.Invalid, fmt.Sprintf("pk1: hex.DecodeString: %v", err))
+	}
+	pk2, err := hex.DecodeString("02dc7aaeb575d3170760f3c719befd52805a0301b200a1e4efb700ebcc379a9af5")
+	if err != nil {
+		return nil, 0, errors.E(errors.Invalid, fmt.Sprintf("pk1: hex.DecodeString: %v", err))
+	}
+	pk1pk2Script, err := stdscript.MultiSigScriptV0(2, pk1, pk2) // pk1, pk2 order here is important!
+	if err != nil {
+		return nil, 0, errors.E(errors.Invalid, fmt.Sprintf("stdscript.MultiSigScriptV0: %v", err))
+	}
+	// TODO - using testnet chain params here!
+	pk1pk2ScriptAddr, err := stdaddr.NewAddressScriptHashV0(pk1pk2Script, chaincfg.TestNet3Params())
+	if err != nil {
+		return nil, 0, errors.E(errors.Invalid, fmt.Sprintf("stdaddr.NewAddressScriptHashV0: %v", err))
+	}
+	vers, pkScript := pk1pk2ScriptAddr.PaymentScript()
+	return pkScript, vers, nil
+}
+
+func (src *p2SHChangeSource) ScriptSize() int {
+	// TODO - looks like this should be estimating redeem script size, just leave
+	//  it wrong for now.
 	return txsizes.P2PKHPkScriptSize
 }
 

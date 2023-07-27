@@ -10,6 +10,8 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/binary"
+	"encoding/hex"
+	"fmt"
 	"net"
 	"sort"
 	"time"
@@ -467,6 +469,50 @@ func (w *Wallet) authorTx(ctx context.Context, op errors.Op, a *authorTx) error 
 	return nil
 }
 
+// authorImportedMultisigTx TODO description.
+// Note, it doesn't sign transaction, only builds it for separate signing later.
+func (w *Wallet) authorImportedMultisigTx(ctx context.Context, op errors.Op, a *authorTx) error {
+	// TODO:
+	//  We probably also want to lock outpoints similar to how it's done in authorTx
+	//  func - since (our multisig address might have multiple UTXOs) we don't want
+	//  some parallel action to spend any of those while we are here.
+
+	var atx *txauthor.AuthoredTx
+	err := walletdb.View(ctx, w.db, func(dbtx walletdb.ReadTx) error {
+		// Create the unsigned transaction.
+		_, tipHeight := w.txStore.MainChainTip(dbtx)
+		ignoreInput := func(op *wire.OutPoint) bool {
+			//_, ok := w.lockedOutpoints[outpoint{op.Hash, op.Index}]
+			//return ok
+			return false
+		}
+		// TODO - how much cofns we need here ?
+		sourceImpl := w.txStore.MakeInputSource(dbtx, a.account,
+			1, tipHeight, ignoreInput)
+		var changeSource txauthor.ChangeSource
+		changeSource = &p2SHChangeSource{}
+		var err error
+		atx, err = txauthor.NewUnsignedTransaction(a.outputs, a.txFee,
+			sourceImpl.SelectInputs, changeSource, w.chainParams.MaxTxSize)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		return errors.E(op, err)
+	}
+
+	err = w.checkHighFees(atx.TotalInput, atx.Tx)
+	if err != nil {
+		return errors.E(op, err)
+	}
+
+	a.atx = atx
+	return nil
+}
+
 // recordAuthoredTx records an authored transaction to the wallet's database.  It
 // also updates the database for change addresses used by the new transaction.
 //
@@ -880,11 +926,12 @@ func makeTicket(params *chaincfg.Params, inputPool *Input, input *Input, addrVot
 	if addrVote == nil {
 		return nil, errors.E(errors.Invalid, "nil vote address")
 	}
-	vers, pkScript := addrVote.VotingRightsScript()
+
+	vers, pk1pk2Script := addrVote.VotingRightsScript()
 
 	txOut := &wire.TxOut{
 		Value:    ticketCost,
-		PkScript: pkScript,
+		PkScript: pk1pk2Script,
 		Version:  vers,
 	}
 	mtx.AddTxOut(txOut)
@@ -945,7 +992,7 @@ func makeTicket(params *chaincfg.Params, inputPool *Input, input *Input, addrVot
 	// Create an OP_RETURN push containing the pubkeyhash to send rewards to.
 	// Apply limits to revocations for fees while not allowing
 	// fees for votes.
-	vers, pkScript = addrSubsidy.RewardCommitmentScript(
+	vers, pk1pk2Script = addrSubsidy.RewardCommitmentScript(
 		amountsCommitted[userSubsidyNullIdx], 0, revocationFeeLimit)
 	if err != nil {
 		return nil, errors.E(errors.Invalid,
@@ -953,17 +1000,17 @@ func makeTicket(params *chaincfg.Params, inputPool *Input, input *Input, addrVot
 	}
 	txout := &wire.TxOut{
 		Value:    0,
-		PkScript: pkScript,
+		PkScript: pk1pk2Script,
 		Version:  vers,
 	}
 	mtx.AddTxOut(txout)
 
 	// Create a new script which pays to the provided address with an
 	// SStx change tagged output.
-	vers, pkScript = addrZeroed.StakeChangeScript()
+	vers, pk1pk2Script = addrZeroed.StakeChangeScript()
 	txOut = &wire.TxOut{
 		Value:    0,
-		PkScript: pkScript,
+		PkScript: pk1pk2Script,
 		Version:  vers,
 	}
 	mtx.AddTxOut(txOut)
@@ -1096,16 +1143,36 @@ func (w *Wallet) mixedSplit(ctx context.Context, req *PurchaseTicketsRequest, ne
 }
 
 func (w *Wallet) individualSplit(ctx context.Context, req *PurchaseTicketsRequest, neededPerTicket dcrutil.Amount) (tx *wire.MsgTx, outIndexes []int, err error) {
-	// Fetch the single use split address to break tickets into, to
-	// immediately be consumed as tickets.
-	//
-	// This opens a write transaction.
-	splitTxAddr, err := w.NewInternalAddress(ctx, req.SourceAccount, WithGapPolicyWrap())
+	//// Fetch the single use split address to break tickets into, to
+	//// immediately be consumed as tickets.
+	////
+	//// This opens a write transaction.
+	//splitTxAddr, err := w.NewInternalAddress(ctx, req.SourceAccount, WithGapPolicyWrap())
+	//if err != nil {
+	//	return
+	//}
+
+	// TODO - could probably check account == ImportedAddrAccount to decide what addr to use
+	pk1, err := hex.DecodeString("030e4db4d37cfa43553c645ad20ca79ae79eef966f41243628310e7624d33a4145")
 	if err != nil {
-		return
+		return nil, nil, errors.E(errors.Invalid, fmt.Sprintf("pk1: hex.DecodeString: %v", err))
+	}
+	pk2, err := hex.DecodeString("02dc7aaeb575d3170760f3c719befd52805a0301b200a1e4efb700ebcc379a9af5")
+	if err != nil {
+		return nil, nil, errors.E(errors.Invalid, fmt.Sprintf("pk1: hex.DecodeString: %v", err))
+	}
+	pk1pk2Script, err := stdscript.MultiSigScriptV0(2, pk1, pk2) // pk1, pk2 order here is important!
+	if err != nil {
+		return nil, nil, errors.E(errors.Invalid, fmt.Sprintf("stdscript.MultiSigScriptV0: %v", err))
+	}
+	// TODO - using testnet chain params here!
+	pk1pk2ScriptAddr, err := stdaddr.NewAddressScriptHashV0(pk1pk2Script, chaincfg.TestNet3Params())
+	if err != nil {
+		return nil, nil, errors.E(errors.Invalid, fmt.Sprintf("stdaddr.NewAddressScriptHashV0: %v", err))
 	}
 
-	vers, splitPkScript := splitTxAddr.PaymentScript()
+	vers, splitPkScript := pk1pk2ScriptAddr.PaymentScript()
+	//vers, splitPkScript := splitTxAddr.PaymentScript()
 
 	// Create the split transaction by using txToOutputs. This varies
 	// based upon whether or not the user is using a stake pool or not.
@@ -1123,6 +1190,7 @@ func (w *Wallet) individualSplit(ctx context.Context, req *PurchaseTicketsReques
 	}
 
 	const op errors.Op = "individualSplit"
+
 	a := &authorTx{
 		outputs:            splitOuts,
 		account:            req.SourceAccount,
@@ -1133,9 +1201,25 @@ func (w *Wallet) individualSplit(ctx context.Context, req *PurchaseTicketsReques
 		dontSignTx:         req.DontSignTx,
 		isTreasury:         false,
 	}
-	err = w.authorTx(ctx, op, a)
-	if err != nil {
-		return
+	if req.SourceAccount == udb.ImportedAddrAccount {
+		// TODO: this check ^ isn't enough to gurantee that imported account is necessarily
+		//  == multisig; we must do this only for multisigs, not other account types ?
+		//  however for other imported accounts this fails anyway! (because imported
+		//  account isn't meant for address-deriving and stuff)
+
+		// This fee estimation broken for multisig transactions ... paying the double
+		// should roughly cover our needs for now.
+		a.txFee = a.txFee * 2
+
+		err = w.authorImportedMultisigTx(ctx, op, a)
+		if err != nil {
+			return
+		}
+	} else {
+		err = w.authorTx(ctx, op, a)
+		if err != nil {
+			return
+		}
 	}
 	err = w.recordAuthoredTx(ctx, op, a)
 	if err != nil {
@@ -1147,8 +1231,8 @@ func (w *Wallet) individualSplit(ctx context.Context, req *PurchaseTicketsReques
 			return
 		}
 	}
-
 	tx = a.atx.Tx
+
 	return
 }
 
@@ -1249,6 +1333,32 @@ func (w *Wallet) purchaseTickets(ctx context.Context, op errors.Op,
 	}
 
 	stakeAddrFunc := func(op errors.Op, account, branch uint32) (stdaddr.StakeAddress, uint32, error) {
+		if account == udb.ImportedAddrAccount {
+			// TODO: this check ^ isn't enough to gurantee that imported account is necessarily
+			//  == multisig; we must do this only for multisigs, not other account types ?
+			//  however for other imported accounts this fails anyway! (because imported
+			//  account isn't meant for address-deriving and stuff)
+			pk1, err := hex.DecodeString("030e4db4d37cfa43553c645ad20ca79ae79eef966f41243628310e7624d33a4145")
+			if err != nil {
+				return nil, 0, errors.E(errors.Invalid, fmt.Sprintf("pk1: hex.DecodeString: %v", err))
+			}
+			pk2, err := hex.DecodeString("02dc7aaeb575d3170760f3c719befd52805a0301b200a1e4efb700ebcc379a9af5")
+			if err != nil {
+				return nil, 0, errors.E(errors.Invalid, fmt.Sprintf("pk1: hex.DecodeString: %v", err))
+			}
+			pk1pk2Script, err := stdscript.MultiSigScriptV0(2, pk1, pk2) // pk1, pk2 order here is important!
+			if err != nil {
+				return nil, 0, errors.E(errors.Invalid, fmt.Sprintf("stdscript.MultiSigScriptV0: %v", err))
+			}
+			// TODO - using testnet chain params here!
+			pk1pk2ScriptAddr, err := stdaddr.NewAddressScriptHashV0(pk1pk2Script, chaincfg.TestNet3Params())
+			if err != nil {
+				return nil, 0, errors.E(errors.Invalid, fmt.Sprintf("stdaddr.NewAddressScriptHashV0: %v", err))
+			}
+
+			return pk1pk2ScriptAddr, 0, nil
+		}
+
 		const accountName = "" // not used, so can be faked.
 		a, err := w.nextAddress(ctx, op, w.persistReturnedChild(ctx, nil), accountName,
 			account, branch, WithGapPolicyIgnore())
@@ -1328,6 +1438,7 @@ func (w *Wallet) purchaseTickets(ctx context.Context, op errors.Op,
 			txsizes.TicketCommitmentScriptSize, txsizes.P2PKHPkScriptSize + 1}
 		estSize = txsizes.EstimateSerializeSizeFromScriptSizes(inSizes,
 			outSizes, 0)
+		// TODO ^ these sizes need to be changed for P2SH
 	} else {
 		// A pool ticket has:
 		//   - two inputs redeeming a P2PKH for the worst case size
@@ -1344,8 +1455,12 @@ func (w *Wallet) purchaseTickets(ctx context.Context, op errors.Op,
 			txsizes.P2PKHPkScriptSize + 1, txsizes.P2PKHPkScriptSize + 1}
 		estSize = txsizes.EstimateSerializeSizeFromScriptSizes(inSizes,
 			outSizes, 0)
+		// TODO ^ these sizes need to be changed for P2SH
 	}
 
+	// This fee estimation broken for multisig transactions ... paying the double
+	// should roughly cover our needs for now.
+	ticketRelayFee = ticketRelayFee * 2
 	ticketFee := txrules.FeeForSerializeSize(ticketRelayFee, estSize)
 	neededPerTicket = ticketFee + ticketPrice
 
