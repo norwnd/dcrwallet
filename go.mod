@@ -4,6 +4,7 @@ go 1.20
 
 require (
 	decred.org/cspp/v2 v2.1.0
+	github.com/davecgh/go-spew v1.1.1
 	github.com/decred/dcrd/addrmgr/v2 v2.0.2
 	github.com/decred/dcrd/blockchain/stake/v5 v5.0.0
 	github.com/decred/dcrd/blockchain/standalone/v2 v2.2.0

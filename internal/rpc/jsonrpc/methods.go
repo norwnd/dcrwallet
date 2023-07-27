@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
+
 	"decred.org/dcrwallet/v4/errors"
 	"decred.org/dcrwallet/v4/internal/loader"
 	"decred.org/dcrwallet/v4/internal/vsp"
@@ -4096,6 +4098,9 @@ func (s *Server) redeemMultiSigOut(ctx context.Context, icmd interface{}) (inter
 		Flags:    &sigHashAll,
 	}
 
+	// TODO
+	fmt.Println(spew.Sdump("signedTxResult, err := s.signRawTransaction(ctx, srtc)"))
+
 	// Sign it and give the results to the user.
 	signedTxResult, err := s.signRawTransaction(ctx, srtc)
 	if signedTxResult == nil || err != nil {
@@ -4736,6 +4741,9 @@ func (s *Server) signRawTransaction(ctx context.Context, icmd interface{}) (inte
 		return nil, errUnloadedWallet
 	}
 
+	// TODO
+	fmt.Println(spew.Sdump("func (s *Server) signRawTransaction(ctx context.Context, icmd interface{}) (interface{}, error) {"))
+
 	tx := wire.NewMsgTx()
 	err := tx.Deserialize(hex.NewDecoder(strings.NewReader(cmd.RawTx)))
 	if err != nil {
@@ -4926,7 +4934,10 @@ func (s *Server) signRawTransaction(ctx context.Context, icmd interface{}) (inte
 	// `complete' denotes that we successfully signed all outputs and that
 	// all scripts will run to completion. This is returned as part of the
 	// reply.
-	signErrs, signErr := w.SignTransaction(ctx, tx, hashType, inputs, keys, scripts)
+	signErrs, err := w.SignTransaction(ctx, tx, hashType, inputs, keys, scripts)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't successfully sign: %v", err)
+	}
 
 	var b strings.Builder
 	b.Grow(2 * tx.SerializeSize())
@@ -4949,7 +4960,7 @@ func (s *Server) signRawTransaction(ctx context.Context, icmd interface{}) (inte
 
 	return types.SignRawTransactionResult{
 		Hex:      b.String(),
-		Complete: len(signErrors) == 0 && signErr == nil,
+		Complete: len(signErrors) == 0,
 		Errors:   signErrors,
 	}, nil
 }

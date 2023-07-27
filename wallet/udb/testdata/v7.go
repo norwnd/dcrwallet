@@ -16,6 +16,7 @@ import (
 	"os"
 	"time"
 
+	"decred.org/dcrwallet/v4/errors"
 	"github.com/decred/dcrd/chaincfg"
 	"github.com/decred/dcrd/chaincfg/chainec"
 	"github.com/decred/dcrd/chaincfg/chainhash"

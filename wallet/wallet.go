@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
+
 	"decred.org/dcrwallet/v4/deployments"
 	"decred.org/dcrwallet/v4/errors"
 	"decred.org/dcrwallet/v4/internal/compat"
@@ -4819,11 +4821,13 @@ func (w *Wallet) SignTransaction(ctx context.Context, tx *wire.MsgTx, hashType t
 		}
 	}()
 
+	// TODO
+	fmt.Println(spew.Sdump("var signErrors []SignatureError"))
+
 	var signErrors []SignatureError
-	err := walletdb.View(ctx, w.db, func(dbtx walletdb.ReadTx) error {
+	err := walletdb.View(ctx, w.db, func(dbtx walletdb.ReadTx) (errEval error) {
 		addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
 		txmgrNs := dbtx.ReadBucket(wtxmgrNamespaceKey)
-		var errEval error
 
 		for i, txIn := range tx.TxIn {
 			// For an SSGen tx, skip the first input as it is a stake base
@@ -4884,6 +4888,11 @@ func (w *Wallet) SignTransaction(ctx context.Context, tx *wire.MsgTx, hashType t
 				return w.manager.RedeemScript(addrmgrNs, addr)
 			}
 
+			// We don't want to change signature script in case we can't properly
+			// update it, we might need to reset it to prevSignatureScript after vm
+			// checks done below.
+			prevSignatureScript := txIn.SignatureScript
+
 			// SigHashSingle inputs can only be signed if there's a
 			// corresponding output. However this could be already signed,
 			// so we always verify the output.
@@ -4904,6 +4913,9 @@ func (w *Wallet) SignTransaction(ctx context.Context, tx *wire.MsgTx, hashType t
 				txIn.SignatureScript = script
 			}
 
+			// TODO
+			fmt.Println(spew.Sdump("GOT HERE!"))
+
 			// Either it was already signed or we just signed it.
 			// Find out if it is completely satisfied or still needs more.
 			vm, err := txscript.NewEngine(prevOutScript, tx, i,
@@ -4912,14 +4924,26 @@ func (w *Wallet) SignTransaction(ctx context.Context, tx *wire.MsgTx, hashType t
 				err = vm.Execute()
 			}
 			if err != nil {
-				var multisigNotEnoughSigs bool
+				// TODO
+				fmt.Println(spew.Sdump(err))
+
+				var (
+					multisigNotEnoughSigs bool
+				)
 				if errors.Is(err, txscript.ErrInvalidStackOperation) {
 					pkScript := additionalPrevScripts[txIn.PreviousOutPoint]
 					class, addr := stdscript.ExtractAddrs(scriptVersionAssumed, pkScript, w.ChainParams())
 					if class == stdscript.STScriptHash && len(addr) > 0 {
 						redeemScript, _ := source.script(addr[0])
 						if stdscript.IsMultiSigScriptV0(redeemScript) {
+							//stdscript.MultiSigRedeemScriptFromScriptSigV0()
 							multisigNotEnoughSigs = true
+
+							fmt.Println(fmt.Sprintf("redeemScript: %x", redeemScript))
+							fmt.Println(fmt.Sprintf("prevSigScript: %x", prevSignatureScript))
+							fmt.Println(fmt.Sprintf("sigScript: %x", txIn.SignatureScript))
+							// TODO
+							fmt.Println("FAILS AS not enough sigs!")
 						}
 					}
 				} else {
@@ -4934,6 +4958,16 @@ func (w *Wallet) SignTransaction(ctx context.Context, tx *wire.MsgTx, hashType t
 						InputIndex: uint32(i),
 						Error:      errors.E(op, err),
 					})
+				}
+
+				if errEval != nil || !multisigNotEnoughSigs {
+					// TODO
+					fmt.Println("ROLLING BACK!")
+
+					// TODO - also must do this rollback properly ? do we even need it ?
+
+					// Better not change signature script to invalid one then.
+					txIn.SignatureScript = prevSignatureScript
 				}
 			}
 		}
